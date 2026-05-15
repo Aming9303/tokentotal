@@ -1,0 +1,13 @@
+node_modules/
+release/
+.env
+.env.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+.license/
+server/data/
+*.pem
+!license-public.pem
+*.key

@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>TokenTotal — Token 用量量化工作台</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <!-- ── Topbar ── -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <div class="brand-lockup">
+            <p class="eyebrow">TokenTotal</p>
+            <span class="edition-badge" id="editionBadge">Free</span>
+          </div>
+          <nav class="tab-nav" role="tablist">
+            <button class="tab-btn active" data-tab="estimate" role="tab" aria-selected="true">估算</button>
+            <button class="tab-btn" data-tab="chat" role="tab" aria-selected="false">聊天</button>
+            <button class="tab-btn" data-tab="connectors" role="tab" aria-selected="false">连接器</button>
+            <button class="tab-btn" data-tab="history" role="tab" aria-selected="false">历史</button>
+            <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">预算</button>
+            <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">设置</button>
+          </nav>
+        </div>
+        <div class="topbar-actions" aria-label="工具操作">
+          <button class="icon-button" id="themeToggle" type="button" title="切换主题" aria-label="切换主题"></button>
+        </div>
+      </header>
+
+      <!-- ══════════ 估算标签页 ══════════ -->
+      <div id="pageEstimate" class="tab-page active" role="tabpanel">
+        <!-- Action bar -->
+        <div class="action-bar">
+          <div class="action-bar-left">
+            <button class="ghost-button" id="loadSample" type="button" title="载入样例">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              载入样例
+            </button>
+            <label class="file-button" for="filePicker">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              导入文件
+            </label>
+            <input id="filePicker" type="file" accept=".txt,.md,.json,.csv,.log,.js,.ts,.tsx,.py,.java,.go,.rs,.html,.css,.xml,.yaml,.yml" />
+            <button class="ghost-button" id="clearInput" type="button" title="清空文本">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+              清空
+            </button>
+          </div>
+          <button class="primary-button" id="recordEstimate" type="button" title="记录此次估算">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            记录此次
+          </button>
+        </div>
+
+        <!-- Workspace -->
+        <section class="workspace">
+          <section class="input-pane" aria-labelledby="inputTitle">
+            <div class="pane-head">
+              <div>
+                <h2 id="inputTitle">输入区</h2>
+                <p>粘贴 prompt、长文、代码或聊天记录。</p>
+              </div>
+            </div>
+
+            <textarea
+              id="sourceText"
+              spellcheck="false"
+              placeholder="把要评估的文本放在这里。工具会估算 token、上下文占比、单次与批量调用成本。"
+            ></textarea>
+
+            <div class="input-footer">
+              <label class="switch">
+                <input id="chatMode" type="checkbox" checked />
+                <span>按对话估算协议开销</span>
+              </label>
+              <label class="small-field">
+                <span>单消息开销</span>
+                <input id="messageOverhead" type="number" min="0" max="20" step="1" value="4" />
+              </label>
+            </div>
+          </section>
+
+          <aside class="control-pane" aria-labelledby="controlTitle">
+            <div class="pane-head stacked">
+              <div>
+                <h2 id="controlTitle">预算参数</h2>
+                <p>模型、输出预算、缓存命中和调用量。</p>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>模型</span>
+              <select id="modelSelect"></select>
+            </label>
+
+            <label class="field">
+              <span>估算策略</span>
+              <select id="estimateMode">
+                <option value="balanced" selected>标准估算</option>
+                <option value="conservative">保守预算</option>
+                <option value="code">代码密集</option>
+                <option value="cjk">中文长文</option>
+              </select>
+            </label>
+
+            <div class="two-col">
+              <label class="field">
+                <span>预计输出 token</span>
+                <input id="outputTokens" type="number" min="0" step="100" value="1200" />
+              </label>
+              <label class="field">
+                <span>上下文上限</span>
+                <input id="contextLimit" type="number" min="1" step="1000" />
+              </label>
+            </div>
+
+            <label class="range-field">
+              <span>缓存输入比例 <strong id="cacheLabel">0%</strong></span>
+              <input id="cacheRatio" type="range" min="0" max="100" step="5" value="0" />
+            </label>
+
+            <div class="two-col">
+              <label class="field">
+                <span>每日调用</span>
+                <input id="dailyCalls" type="number" min="1" step="1" value="100" />
+              </label>
+              <label class="field">
+                <span>工作天/月</span>
+                <input id="workDays" type="number" min="1" max="31" step="1" value="22" />
+              </label>
+            </div>
+
+            <div class="price-grid" aria-label="当前模型价格">
+              <div>
+                <span>输入</span>
+                <strong id="inputPrice">$0.00</strong>
+              </div>
+              <div>
+                <span>缓存</span>
+                <strong id="cachedPrice">$0.00</strong>
+              </div>
+              <div>
+                <span>输出</span>
+                <strong id="outputPrice">$0.00</strong>
+              </div>
+            </div>
+            <p class="price-note">价格单位：$ / 1M token</p>
+          </aside>
+        </section>
+
+        <!-- Metrics band -->
+        <section class="metrics-band" aria-label="核心量化结果">
+          <article class="metric primary">
+            <span>估算输入 token</span>
+            <strong id="tokenCount">0</strong>
+            <small id="tokenConfidence">等待输入</small>
+          </article>
+          <article class="metric">
+            <span>单次成本</span>
+            <strong id="singleCost">$0.0000</strong>
+            <small id="costBreakdown">输入 $0.0000 / 输出 $0.0000</small>
+          </article>
+          <article class="metric">
+            <span>月成本</span>
+            <strong id="monthlyCost">$0.00</strong>
+            <small id="callSummary">100 次/日，22 天</small>
+          </article>
+          <article class="metric gauge-card">
+            <span>上下文占比</span>
+            <div class="gauge" aria-hidden="true"><div id="gaugeFill"></div></div>
+            <strong id="contextUsage">0%</strong>
+          </article>
+        </section>
+
+        <section class="insights-panel panel" aria-labelledby="insightTitle">
+          <div class="panel-head">
+            <h2 id="insightTitle">量化建议</h2>
+            <span class="source-note">根据当前文本和预算参数实时生成</span>
+          </div>
+          <div class="insight-list" id="insightList"></div>
+        </section>
+
+        <section class="prompt-slim-panel panel" aria-labelledby="promptSlimTitle">
+          <div class="panel-head prompt-slim-head">
+            <div>
+              <h2 id="promptSlimTitle">Prompt 瘦身</h2>
+              <span class="source-note">在不调用云模型的前提下，清理冗余、重复和可压缩表达。</span>
+            </div>
+            <div class="prompt-slim-actions">
+              <select id="promptSlimMode" class="range-select">
+                <option value="safe">稳妥</option>
+                <option value="standard" selected>标准</option>
+                <option value="aggressive">激进</option>
+              </select>
+              <button class="ghost-button" id="promptSlimRun" type="button">生成瘦身版</button>
+              <button class="ghost-button" id="promptSlimEnglish" type="button">转英文</button>
+              <button class="ghost-button" id="promptSlimCopy" type="button">复制</button>
+              <button class="primary-button" id="promptSlimApply" type="button">替换输入</button>
+            </div>
+          </div>
+          <div class="prompt-slim-metrics">
+            <div><span>原始 token</span><strong id="promptSlimOriginal">0</strong></div>
+            <div><span>瘦身后</span><strong id="promptSlimNew">0</strong></div>
+            <div><span>节省 token</span><strong id="promptSlimSaved">0</strong></div>
+            <div><span>预计节省</span><strong id="promptSlimSaving">$0.0000</strong></div>
+          </div>
+          <textarea id="promptSlimOutput" class="prompt-slim-output" readonly placeholder="生成后这里会显示瘦身版 prompt。"></textarea>
+          <div class="prompt-slim-notes" id="promptSlimNotes"></div>
+        </section>
+
+        <!-- Analysis grid -->
+        <section class="analysis-grid">
+          <section class="panel" aria-labelledby="detailTitle">
+            <div class="panel-head">
+              <h2 id="detailTitle">文本拆解</h2>
+              <button class="ghost-button" id="copyReport" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                复制报告
+              </button>
+            </div>
+            <div class="breakdown">
+              <div><span>字符</span><strong id="charCount">0</strong></div>
+              <div><span>英文词</span><strong id="wordCount">0</strong></div>
+              <div><span>CJK 字符</span><strong id="cjkCount">0</strong></div>
+              <div><span>行数</span><strong id="lineCount">0</strong></div>
+              <div><span>消息数</span><strong id="messageCount">0</strong></div>
+              <div><span>代码密度</span><strong id="codeDensity">0%</strong></div>
+            </div>
+            <div class="token-bars" id="tokenBars" aria-label="token 来源分布"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="compareTitle">
+            <div class="panel-head">
+              <h2 id="compareTitle">模型对比</h2>
+              <span class="source-note">价格按每 1M token 计</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>厂商</th>
+                    <th>模型</th>
+                    <th>上下文</th>
+                    <th>单次成本</th>
+                    <th>月成本</th>
+                  </tr>
+                </thead>
+                <tbody id="modelTable"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+      </div>
+
+      <!-- ══════════ 聊天标签页 ══════════ -->
+      <div id="pageChat" class="tab-page" role="tabpanel">
+        <div class="action-bar">
+          <div class="action-bar-left">
+            <button class="ghost-button" id="refreshChatModels" type="button" title="刷新 Ollama 模型">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+              </svg>
+              刷新模型
+            </button>
+            <button class="ghost-button" id="clearChat" type="button" title="清空当前会话">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+              清空会话
+            </button>
+          </div>
+          <button class="primary-button" id="chatStartProxy" type="button" title="启用自动 token 统计">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            启用统计
+          </button>
+        </div>
+
+        <section class="chat-layout">
+          <section class="panel chat-main" aria-labelledby="chatTitle">
+            <div class="panel-head">
+              <div>
+                <h2 id="chatTitle">本地模型聊天</h2>
+                <span class="source-note">发送后自动统计 token，并写入历史记录</span>
+              </div>
+            </div>
+
+            <div class="chat-thread" id="chatThread" aria-live="polite">
+              <div class="chat-empty" id="chatEmpty">暂无会话</div>
+            </div>
+
+            <div class="chat-composer">
+              <textarea id="chatInput" spellcheck="false" placeholder="输入消息，按 Ctrl + Enter 发送"></textarea>
+              <button class="primary-button" id="chatSend" type="button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+                发送
+              </button>
+            </div>
+          </section>
+
+          <aside class="panel chat-side" aria-labelledby="chatControlTitle">
+            <div class="panel-head">
+              <div>
+                <h2 id="chatControlTitle">运行参数</h2>
+                <span class="source-note" id="chatModelStatus">等待连接 Ollama</span>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>模型</span>
+              <select id="chatModel">
+                <option value="qwen3:4b" selected>qwen3:4b</option>
+                <option value="qwen3:0.6b">qwen3:0.6b</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>系统提示词</span>
+              <textarea id="chatSystemPrompt" class="compact-textarea" spellcheck="false" placeholder="可选"></textarea>
+            </label>
+
+            <label class="range-field">
+              <span>温度 <strong id="chatTemperatureLabel">0.7</strong></span>
+              <input id="chatTemperature" type="range" min="0" max="2" step="0.1" value="0.7" />
+            </label>
+
+            <div class="proxy-status-line compact">
+              <strong id="chatProxyStatus">统计未启用</strong>
+              <code id="chatProxyUrl">http://127.0.0.1:8787</code>
+            </div>
+
+            <div class="chat-stat-grid" aria-label="本次响应统计">
+              <div><span>输入 token</span><strong id="chatStatInput">0</strong></div>
+              <div><span>输出 token</span><strong id="chatStatOutput">0</strong></div>
+              <div><span>总 token</span><strong id="chatStatTotal">0</strong></div>
+              <div><span>耗时</span><strong id="chatStatLatency">0 ms</strong></div>
+              <div><span>速度</span><strong id="chatStatSpeed">0 tok/s</strong></div>
+            </div>
+          </aside>
+        </section>
+      </div>
+
+      <!-- ══════════ 连接器标签页 ══════════ -->
+      <div id="pageConnectors" class="tab-page" role="tabpanel">
+        <div class="action-bar">
+          <div class="action-bar-left">
+            <button class="ghost-button" id="refreshConnectors" type="button" title="刷新连接器状态">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+                <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+              </svg>
+              刷新状态
+            </button>
+            <button class="primary-button" id="connectorSyncAll" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              同步日志
+            </button>
+          </div>
+          <button class="ghost-button" id="connectorCopyProxy" type="button">复制统计地址</button>
+        </div>
+
+        <section class="metrics-band four-col connector-metrics">
+          <article class="metric">
+            <span>可用采集通道</span>
+            <strong id="connectorExactCount">0</strong>
+            <small>代理、日志、低置信审计或官方 usage</small>
+          </article>
+          <article class="metric">
+            <span>本地模型</span>
+            <strong id="connectorLocalModels">0</strong>
+            <small id="connectorLocalModelNames">等待刷新</small>
+          </article>
+          <article class="metric">
+            <span>统计地址</span>
+            <strong id="connectorProxyState">未启用</strong>
+            <small id="connectorProxyUrl">http://127.0.0.1:8787</small>
+          </article>
+          <article class="metric">
+            <span>云端密钥</span>
+            <strong id="connectorKeyState">未配置</strong>
+            <small>用于官方 usage 和云模型聊天</small>
+          </article>
+        </section>
+
+        <section class="connector-section">
+          <div class="panel-head">
+            <div>
+              <h2>可精确统计</h2>
+              <span class="source-note">优先接这些，它们能拿到真实 token 或真实 usage 字段</span>
+            </div>
+          </div>
+          <div class="connector-card-grid">
+            <article class="connector-card">
+              <div class="connector-card-head">
+                <div>
+                  <strong>Ollama</strong>
+                  <span>本地模型运行时</span>
+                </div>
+                <em id="connOllamaBadge" class="status-badge">未检测</em>
+              </div>
+              <p id="connOllamaDetail">读取本机模型列表，并通过统计通道记录 prompt/eval token。</p>
+              <div class="connector-actions">
+                <button class="primary-button" id="connEnableOllama" type="button">启用统计</button>
+                <button class="ghost-button" id="connRefreshOllama" type="button">刷新模型</button>
+              </div>
+            </article>
+
+            <article class="connector-card">
+              <div class="connector-card-head">
+                <div>
+                  <strong>OpenAI-compatible</strong>
+                  <span>LM Studio / vLLM / LocalAI / OpenRouter</span>
+                </div>
+                <em id="connCompatibleBadge" class="status-badge">待配置</em>
+              </div>
+              <p>让外部工具把 base URL 指向统计地址；只要响应里有 usage，就能自动入账。</p>
+              <div class="connector-actions">
+                <button class="ghost-button" id="connCopyCompatible" type="button">复制地址</button>
+                <button class="ghost-button" id="connOpenProxySettings" type="button">配置目标</button>
+              </div>
+            </article>
+
+            <article class="connector-card">
+              <div class="connector-card-head">
+                <div>
+                  <strong>Codex</strong>
+                  <span>本地会话日志</span>
+                </div>
+                <em id="connCodexBadge" class="status-badge">可同步</em>
+              </div>
+              <p id="connCodexDetail">读取 ~/.codex/sessions 和桌面版 logs_*.sqlite 的 token 元数据，不导入提示词正文。</p>
+              <div class="connector-actions">
+                <button class="primary-button" id="connSyncCodex" type="button">同步 Codex</button>
+              </div>
+            </article>
+
+            <article class="connector-card">
+              <div class="connector-card-head">
+                <div>
+                  <strong>Claude Code</strong>
+                  <span>本地项目日志</span>
+                </div>
+                <em id="connClaudeBadge" class="status-badge">可同步</em>
+              </div>
+              <p id="connClaudeDetail">读取 ~/.claude/projects 里的 usage 字段，适合核对 Claude 开发成本。</p>
+              <div class="connector-actions">
+                <button class="primary-button" id="connSyncClaude" type="button">同步 Claude</button>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="connector-section panel">
+          <div class="panel-head">
+            <div>
+              <h2>云端服务商</h2>
+              <span class="source-note">先管理密钥和接入方式，后续接官方 usage/cost API</span>
+            </div>
+          </div>
+          <div class="cloud-connector-list">
+            <div class="cloud-connector-row">
+              <strong>OpenAI</strong>
+              <span id="connOpenAIDetail">未配置密钥</span>
+              <button class="ghost-button" id="connOpenAISettings" type="button">配置密钥</button>
+            </div>
+            <div class="cloud-connector-row">
+              <strong>Anthropic</strong>
+              <span>下一步接 Admin Cost Report 和 Messages usage</span>
+              <button class="ghost-button" id="connAnthropicSettings" type="button">预留</button>
+            </div>
+            <div class="cloud-connector-row">
+              <strong>OpenRouter</strong>
+              <span>建议先用 OpenAI-compatible 统计通道，后续补 generation metadata</span>
+              <button class="ghost-button" id="connOpenRouterCopy" type="button">复制统计地址</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="connector-section panel">
+          <div class="panel-head">
+            <div>
+              <h2>外部工具接入</h2>
+              <span class="source-note">这些工具通常可以改 base URL 或 provider，适合接统计通道</span>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>工具</th>
+                  <th>接入方式</th>
+                  <th>统计精度</th>
+                  <th>建议</th>
+                </tr>
+              </thead>
+              <tbody id="connectorToolTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ══════════ 历史标签页 ══════════ -->
+      <div id="pageHistory" class="tab-page" role="tabpanel">
+        <div class="action-bar">
+          <div class="action-bar-left">
+            <select id="historyRange" class="range-select">
+              <option value="7">最近 7 天</option>
+              <option value="30" selected>最近 30 天</option>
+              <option value="90">最近 90 天</option>
+              <option value="0">全部</option>
+            </select>
+          </div>
+          <div class="action-bar-right">
+            <button class="ghost-button" id="exportCsv" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              导出 CSV
+            </button>
+            <button class="ghost-button danger" id="clearHistory" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+              清除历史
+            </button>
+          </div>
+        </div>
+
+        <!-- Chart -->
+        <div class="chart-container panel">
+          <div class="panel-head">
+            <h2>每日成本趋势</h2>
+          </div>
+          <canvas id="costChart" width="800" height="280"></canvas>
+          <div class="chart-empty" id="chartEmpty">暂无历史记录</div>
+        </div>
+
+        <!-- Summary metrics -->
+        <section class="metrics-band four-col">
+          <article class="metric">
+            <span>总估算次数</span>
+            <strong id="histTotalCount">0</strong>
+          </article>
+          <article class="metric">
+            <span>总 token</span>
+            <strong id="histTotalTokens">0</strong>
+          </article>
+          <article class="metric">
+            <span>总成本</span>
+            <strong id="histTotalCost">$0.00</strong>
+          </article>
+          <article class="metric">
+            <span>日均成本</span>
+            <strong id="histDailyCost">$0.00</strong>
+          </article>
+        </section>
+
+        <section class="panel data-quality-panel">
+          <div class="panel-head">
+            <div>
+              <h2>数据可信度</h2>
+              <span class="source-note">本地日志只能做审计估算，官方账单接入前不能作为结算依据。</span>
+            </div>
+          </div>
+          <div class="quality-grid">
+            <div>
+              <span>精确 token</span>
+              <strong id="qualityExactTokens">0</strong>
+            </div>
+            <div>
+              <span>低置信 token</span>
+              <strong id="qualityObservedTokens">0</strong>
+            </div>
+            <div>
+              <span>手动估算 token</span>
+              <strong id="qualityEstimatedTokens">0</strong>
+            </div>
+            <div>
+              <span>数据状态</span>
+              <strong id="qualityStatus">未同步</strong>
+            </div>
+          </div>
+          <p class="quality-warning" id="qualityWarning">同步本地工具或接入官方账单后，这里会显示数据可信度。</p>
+        </section>
+
+        <!-- History table -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>记录明细</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>来源</th>
+                  <th>模型</th>
+                  <th>输入 token</th>
+                  <th>输出 token</th>
+                  <th>可信度</th>
+                  <th>成本</th>
+                </tr>
+              </thead>
+              <tbody id="historyTable"></tbody>
+            </table>
+          </div>
+          <div class="table-empty" id="historyEmpty">暂无记录，可在预算页同步本地 AI 工具用量，或在估算页点击"记录此次"。</div>
+        </section>
+      </div>
+
+      <!-- ══════════ 预算标签页 ══════════ -->
+      <div id="pageBudget" class="tab-page" role="tabpanel">
+        <section class="panel connector-panel">
+          <div class="panel-head">
+            <div>
+              <h2>自动采集</h2>
+              <span class="source-note">从本机 AI 工具日志同步已发生的 token 用量</span>
+            </div>
+          </div>
+          <div class="connector-grid">
+            <button class="ghost-button connector-button" id="syncCodex" type="button">
+              <strong>Codex</strong>
+              <span>读取 ~/.codex/sessions</span>
+            </button>
+            <button class="ghost-button connector-button" id="syncClaude" type="button">
+              <strong>Claude Code</strong>
+              <span>读取 ~/.claude/projects</span>
+            </button>
+            <button class="primary-button connector-button" id="syncAllUsage" type="button">
+              <strong>同步全部</strong>
+              <span>自动去重导入</span>
+            </button>
+          </div>
+          <p class="setting-desc" id="syncStatus">只读取 token 用量字段，不导入提示词正文。</p>
+        </section>
+
+        <section class="panel data-quality-panel compact">
+          <div class="panel-head">
+            <div>
+              <h2>预算可信度</h2>
+              <span class="source-note" id="budgetQualityNote">本页展示估算成本；官方账单接入前请不要用于结算或报销。</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Big progress -->
+        <section class="panel budget-hero">
+          <div class="panel-head">
+            <h2>本月预算</h2>
+            <span class="budget-period" id="budgetPeriod"></span>
+          </div>
+          <div class="budget-progress-wrap">
+            <div class="budget-progress-bar">
+              <div class="budget-progress-fill" id="budgetFill"></div>
+            </div>
+            <div class="budget-progress-labels">
+              <span id="budgetUsed">$0.00</span>
+              <strong id="budgetPct">0%</strong>
+              <span id="budgetTotal">$0.00</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Budget metrics -->
+        <section class="metrics-band four-col">
+          <article class="metric">
+            <span>日均花费</span>
+            <strong id="budgetDailyAvg">$0.00</strong>
+          </article>
+          <article class="metric">
+            <span>预计月底</span>
+            <strong id="budgetProjected">$0.00</strong>
+          </article>
+          <article class="metric">
+            <span>剩余预算</span>
+            <strong id="budgetRemaining">$0.00</strong>
+          </article>
+          <article class="metric">
+            <span>剩余天数</span>
+            <strong id="budgetDaysLeft">0</strong>
+          </article>
+        </section>
+
+        <!-- Cost diagnosis -->
+        <section class="panel diagnosis-panel">
+          <div class="panel-head">
+            <div>
+              <h2>成本诊断</h2>
+              <span class="source-note">找出为什么贵，并给出更便宜的可替换模型</span>
+            </div>
+          </div>
+          <div id="costDiagnosisList" class="diagnosis-list"></div>
+          <div class="table-wrap recommendation-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>替换模型</th>
+                  <th>厂商</th>
+                  <th>预计成本</th>
+                  <th>预计节省</th>
+                  <th>适合场景</th>
+                </tr>
+              </thead>
+              <tbody id="recommendationTable"></tbody>
+            </table>
+          </div>
+          <div class="table-empty" id="recommendationEmpty">暂无可诊断数据。同步或产生几条真实调用后，这里会显示成本原因和替换建议。</div>
+        </section>
+
+        <!-- Provider breakdown -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>厂商分布</h2>
+          </div>
+          <div id="providerBars" class="provider-bars"></div>
+          <div class="table-empty" id="providerEmpty">暂无数据</div>
+        </section>
+
+        <!-- Budget config -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>预算配置</h2>
+          </div>
+          <div class="settings-row">
+            <label class="field">
+              <span>月预算金额 ($)</span>
+              <input id="budgetAmount" type="number" min="0" step="1" value="50" />
+            </label>
+            <label class="field">
+              <span>预警阈值 (%)</span>
+              <input id="budgetThreshold" type="number" min="0" max="100" step="5" value="80" />
+            </label>
+            <button class="primary-button" id="saveBudget" type="button">保存预算</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ══════════ 设置标签页 ══════════ -->
+      <div id="pageSettings" class="tab-page" role="tabpanel">
+        <!-- General -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>通用设置</h2>
+          </div>
+          <div class="settings-group">
+            <label class="setting-item">
+              <div>
+                <strong>剪贴板监控</strong>
+                <p>复制文本后自动填入估算页面</p>
+              </div>
+              <input id="settingClipboard" type="checkbox" checked />
+            </label>
+            <label class="setting-item">
+              <div>
+                <strong>自动保存</strong>
+                <p>剪贴板文本自动记录到历史</p>
+              </div>
+              <input id="settingAutoSave" type="checkbox" />
+            </label>
+            <label class="setting-item">
+              <div>
+                <strong>启动最小化</strong>
+                <p>启动时最小化到系统托盘</p>
+              </div>
+              <input id="settingStartMin" type="checkbox" />
+            </label>
+          </div>
+        </section>
+
+        <!-- License -->
+        <section class="panel license-panel">
+          <div class="panel-head">
+            <div>
+              <h2>版本与授权</h2>
+              <span class="source-note">免费版用于体验核心估算，Pro 解锁自动统计和商业工作流。</span>
+            </div>
+            <span class="license-plan-badge free" id="licensePlanBadge">Free</span>
+          </div>
+          <div class="license-layout">
+            <div class="license-summary">
+              <strong id="licenseStatusText">正在读取授权状态...</strong>
+              <div class="license-meta">
+                <span>账号：<b id="licenseAccount">未激活</b></span>
+                <span>有效期：<b id="licenseExpiry">升级后显示</b></span>
+              </div>
+              <div class="license-feature-list" id="licenseFeatureList"></div>
+              <p class="setting-desc" id="licenseDevHint">支付平台上线后，购买成功页或邮件会给用户发放 License Key。</p>
+            </div>
+            <div class="license-actions">
+              <label class="field">
+                <span>License Key</span>
+                <input id="licenseKey" type="password" placeholder="TT-PRO-..." autocomplete="off" />
+              </label>
+              <div class="settings-group row">
+                <button class="primary-button" id="licenseActivate" type="button">激活 Pro</button>
+                <button class="ghost-button" id="licenseBuy" type="button">购买 Pro</button>
+                <button class="ghost-button" id="licenseDeactivate" type="button">停用</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- API config -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>API 配置</h2>
+          </div>
+          <div class="settings-group">
+            <label class="field">
+              <span>OpenAI API Key</span>
+              <input id="openaiKey" type="password" placeholder="sk-..." />
+              <small class="field-help" id="apiKeyHelp">桌面版使用系统安全存储；浏览器版仅当前会话保留。</small>
+            </label>
+            <button class="ghost-button" id="fetchUsage" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 4 1 10 7 10"/>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+              拉取本月用量
+            </button>
+          </div>
+        </section>
+
+        <!-- Proxy config -->
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>本地代理</h2>
+              <span class="source-note">把 AI 工具的 base URL 指向 TokenTotal，自动记录 usage</span>
+            </div>
+          </div>
+          <div class="settings-row proxy-row">
+            <label class="field">
+              <span>监听端口</span>
+              <input id="proxyPort" type="number" min="1024" max="65535" step="1" value="8787" />
+            </label>
+            <label class="field proxy-target-field">
+              <span>目标服务</span>
+              <input id="proxyTarget" type="url" value="http://127.0.0.1:11434" />
+            </label>
+            <label class="field">
+              <span>厂商</span>
+              <select id="proxyProvider">
+                <option value="Local">Local / Ollama</option>
+                <option value="OpenAI">OpenAI</option>
+                <option value="Anthropic">Anthropic</option>
+                <option value="OpenAI-compatible">OpenAI-compatible</option>
+              </select>
+            </label>
+            <button class="primary-button" id="startProxy" type="button">启动代理</button>
+            <button class="ghost-button" id="stopProxy" type="button">停止</button>
+          </div>
+          <div class="proxy-status-line">
+            <strong id="proxyStatus">未运行</strong>
+            <code id="proxyBaseUrl">http://127.0.0.1:8787</code>
+            <button class="ghost-button" id="copyProxyUrl" type="button">复制地址</button>
+          </div>
+          <p class="setting-desc">示例：Ollama 目标服务填 <code>http://127.0.0.1:11434</code>；OpenAI-compatible 服务填实际 API 根地址。客户端 base URL 改成上面的代理地址。</p>
+        </section>
+
+        <!-- Data import -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>数据导入</h2>
+          </div>
+          <div class="settings-group">
+            <p class="setting-desc">导入 CSV 文件（列: timestamp, model, provider, inputTokens, outputTokens, cost）</p>
+            <label class="file-button" for="csvPicker">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              选择 CSV 文件
+            </label>
+            <input id="csvPicker" type="file" accept=".csv" />
+          </div>
+        </section>
+
+        <!-- Data management -->
+        <section class="panel">
+          <div class="panel-head">
+            <h2>数据管理</h2>
+          </div>
+          <div class="settings-group row">
+            <button class="ghost-button" id="exportAllData" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              导出全部数据
+            </button>
+            <button class="ghost-button danger" id="clearAllData" type="button">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+              清除全部数据
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Toast container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

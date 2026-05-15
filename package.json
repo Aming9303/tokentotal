@@ -1,0 +1,53 @@
+{
+  "name": "tokentotal",
+  "version": "1.0.0",
+  "description": "TokenTotal — Token 用量量化工作台",
+  "author": "TokenTotal",
+  "main": "main.js",
+  "scripts": {
+    "check": "node --check main.js && node --check app.js && node --check preload.js",
+    "build:free": "electron-builder --win portable --x64",
+    "license:issue": "node scripts/issue-license.js",
+    "license:keys": "node scripts/generate-license-keys.js",
+    "pay:dev": "node server/wechat-pay-server.js",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "build": {
+    "appId": "app.tokentotal.free",
+    "productName": "TokenTotal Free",
+    "directories": {
+      "output": "release/free"
+    },
+    "files": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      "main.js",
+      "preload.js",
+      "package.json",
+      "README.md",
+      "OLLAMA.md",
+      "DESIGN.md",
+      "MANUAL_SALES.md",
+      "PAYMENTS.md"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "TokenTotal-Free-${version}-${arch}.${ext}"
+    }
+  }
+}
