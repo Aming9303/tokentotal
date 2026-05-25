@@ -9,6 +9,7 @@
     "build:free": "electron-builder --win portable --x64",
     "license:issue": "node scripts/issue-license.js",
     "license:keys": "node scripts/generate-license-keys.js",
+    "license:publish-public": "node scripts/publish-license-public-key.js",
     "pay:dev": "node server/wechat-pay-server.js",
     "start": "electron ."
   },
@@ -36,7 +37,8 @@
       "OLLAMA.md",
       "DESIGN.md",
       "MANUAL_SALES.md",
-      "PAYMENTS.md"
+      "PAYMENTS.md",
+      "license-public.pem"
     ],
     "win": {
       "target": [

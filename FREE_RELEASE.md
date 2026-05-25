@@ -10,9 +10,9 @@ Free Edition 默认开放：
 - 基础 Prompt 瘦身
 - 模型成本对比
 - 历史记录 100 条
-- 预算页基础查看
+- 钱包和预算基础查看
 
-暂不开放或需要 Pro License：
+需要 Pro License：
 
 - Codex / Claude Code / 外部工具连接器同步
 - 本地模型聊天
@@ -20,6 +20,16 @@ Free Edition 默认开放：
 - 官方用量拉取
 - CSV / 全量数据导出
 - 不限历史记录
+
+## 打包前准备
+
+如果你要让内测用户可以激活 Pro，先把开发者公钥复制到应用包入口：
+
+```powershell
+npm run license:publish-public
+```
+
+这个命令只复制公钥，不会暴露私钥。用户不需要生成公钥。
 
 ## 打包
 
@@ -39,6 +49,8 @@ release/free/
 ```text
 TokenTotal-Free-1.0.0-x64.exe
 ```
+
+如果你之前已经上传过没有内置 `license-public.pem` 的版本，需要重新打包并重新上传，否则用户无法激活 Pro。
 
 ## GitHub Release 文案
 
@@ -64,7 +76,7 @@ ai-cost token-estimator prompt-optimizer ollama codex claude-code
 
 ## 看下载量
 
-GitHub Release 的每个 asset 页面会显示下载次数；也可以以后用 GitHub API 拉取 release asset 的 `download_count`。
+GitHub Release 的每个 asset 页面会显示下载次数；以后也可以用 GitHub API 拉取 release asset 的 `download_count`。
 
 ## 发布前检查
 
@@ -72,4 +84,5 @@ GitHub Release 的每个 asset 页面会显示下载次数；也可以以后用 
 - “购买 Pro”在未配置购买链接时不可点击。
 - 免费版可以完成估算和基础 Prompt 瘦身。
 - 连接器、聊天、导出等 Pro 功能会提示升级。
+- Pro 内测激活码是 `TT-PRO-...`，不是 `TT-DEV-PRO`。
 - 不要把 `.license/private.pem`、微信支付密钥、订单数据上传到仓库。

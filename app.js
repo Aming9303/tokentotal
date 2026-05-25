@@ -44,6 +44,33 @@ const providerColors = {
 };
 
 const FREE_HISTORY_LIMIT = 100;
+const CNY_PER_USD = 7.2;
+const DEFAULT_WORKSPACE = {
+  activeMemberId: "me",
+  wallet: {
+    currency: "CNY",
+    monthlyBudget: 300,
+    warningPct: 80,
+    tokenModelId: "gpt-5-mini",
+  },
+  members: [
+    {
+      id: "me",
+      name: "我",
+      role: "Owner",
+      monthlyBudget: 300,
+      enabled: true,
+      allowedModels: "all",
+    },
+  ],
+  security: {
+    detectSecrets: true,
+    detectPII: true,
+    detectCustomerData: true,
+    blockHighRisk: false,
+    customKeywords: "客户资料\n合同\n身份证\n银行卡\napi key\nsecret",
+  },
+};
 const proFeatureLabels = {
   connectors: "连接器同步",
   localChat: "本地模型聊天",
@@ -290,6 +317,16 @@ const storage = {
 /* ── DOM elements ── */
 
 const els = {
+  // Dashboard page
+  dashboardSpend: document.querySelector("#dashboardSpend"),
+  dashboardBudget: document.querySelector("#dashboardBudget"),
+  dashboardRemaining: document.querySelector("#dashboardRemaining"),
+  dashboardCalls: document.querySelector("#dashboardCalls"),
+  dashboardRisk: document.querySelector("#dashboardRisk"),
+  dashboardActiveMember: document.querySelector("#dashboardActiveMember"),
+  dashboardMemberSelect: document.querySelector("#dashboardMemberSelect"),
+  dashboardMemberTable: document.querySelector("#dashboardMemberTable"),
+  dashboardAlertList: document.querySelector("#dashboardAlertList"),
   // Estimate page
   sourceText: document.querySelector("#sourceText"),
   modelSelect: document.querySelector("#modelSelect"),
@@ -427,6 +464,30 @@ const els = {
   costDiagnosisList: document.querySelector("#costDiagnosisList"),
   recommendationTable: document.querySelector("#recommendationTable"),
   recommendationEmpty: document.querySelector("#recommendationEmpty"),
+  walletCurrency: document.querySelector("#walletCurrency"),
+  walletMonthlyBudget: document.querySelector("#walletMonthlyBudget"),
+  walletWarningPct: document.querySelector("#walletWarningPct"),
+  walletTokenModel: document.querySelector("#walletTokenModel"),
+  walletUsdBudget: document.querySelector("#walletUsdBudget"),
+  walletTokenCapacity: document.querySelector("#walletTokenCapacity"),
+  walletMemberTable: document.querySelector("#walletMemberTable"),
+  saveWallet: document.querySelector("#saveWallet"),
+  // Team page
+  teamMemberName: document.querySelector("#teamMemberName"),
+  teamMemberRole: document.querySelector("#teamMemberRole"),
+  teamMemberBudget: document.querySelector("#teamMemberBudget"),
+  teamAddMember: document.querySelector("#teamAddMember"),
+  teamActiveMember: document.querySelector("#teamActiveMember"),
+  teamMemberTable: document.querySelector("#teamMemberTable"),
+  // Security page
+  securityDetectSecrets: document.querySelector("#securityDetectSecrets"),
+  securityDetectPII: document.querySelector("#securityDetectPII"),
+  securityDetectCustomerData: document.querySelector("#securityDetectCustomerData"),
+  securityBlockHighRisk: document.querySelector("#securityBlockHighRisk"),
+  securityKeywords: document.querySelector("#securityKeywords"),
+  saveSecurity: document.querySelector("#saveSecurity"),
+  securitySummary: document.querySelector("#securitySummary"),
+  securityRecentTable: document.querySelector("#securityRecentTable"),
   // Settings page
   settingClipboard: document.querySelector("#settingClipboard"),
   settingAutoSave: document.querySelector("#settingAutoSave"),
@@ -637,6 +698,109 @@ async function openPurchasePage() {
   }
 }
 
+function normalizeWorkspace(raw = {}) {
+  const workspace = {
+    ...DEFAULT_WORKSPACE,
+    ...raw,
+    wallet: { ...DEFAULT_WORKSPACE.wallet, ...(raw.wallet || {}) },
+    security: { ...DEFAULT_WORKSPACE.security, ...(raw.security || {}) },
+    members: Array.isArray(raw.members) && raw.members.length ? raw.members : DEFAULT_WORKSPACE.members,
+  };
+  if (!workspace.members.some((member) => member.id === workspace.activeMemberId)) {
+    workspace.activeMemberId = workspace.members[0]?.id || "me";
+  }
+  return workspace;
+}
+
+async function getWorkspace() {
+  const settings = await storage.getSettings();
+  return normalizeWorkspace(settings.workspace || {});
+}
+
+async function saveWorkspace(workspace) {
+  const normalized = normalizeWorkspace(workspace);
+  await storage.setSetting("workspace", normalized);
+  return normalized;
+}
+
+function currencySymbol(currency) {
+  return currency === "CNY" ? "¥" : "$";
+}
+
+function toDisplayMoney(usd, workspace) {
+  const currency = workspace?.wallet?.currency || "CNY";
+  const value = currency === "CNY" ? Number(usd || 0) * CNY_PER_USD : Number(usd || 0);
+  return `${currencySymbol(currency)}${value.toFixed(2)}`;
+}
+
+function walletBudgetUsd(workspace) {
+  const wallet = workspace.wallet || DEFAULT_WORKSPACE.wallet;
+  const amount = Number(wallet.monthlyBudget || 0);
+  return wallet.currency === "CNY" ? amount / CNY_PER_USD : amount;
+}
+
+function monthRange() {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).getTime() + 86400000;
+  return { now, monthStart, monthEnd };
+}
+
+function memberForEntry(entry, workspace) {
+  return workspace.members.find((member) => member.id === entry.memberId) || workspace.members[0];
+}
+
+function summarizeByMember(entries, workspace) {
+  const summary = new Map();
+  for (const member of workspace.members) {
+    summary.set(member.id, {
+      member,
+      cost: 0,
+      tokens: 0,
+      calls: 0,
+      risks: 0,
+    });
+  }
+  for (const entry of entries) {
+    const member = memberForEntry(entry, workspace);
+    const row = summary.get(member.id) || { member, cost: 0, tokens: 0, calls: 0, risks: 0 };
+    row.cost += Number(entry.cost || 0);
+    row.tokens += Number(entry.inputTokens || 0) + Number(entry.outputTokens || 0);
+    row.calls += 1;
+    if (entry.security?.riskLevel && entry.security.riskLevel !== "low") row.risks += 1;
+    summary.set(member.id, row);
+  }
+  return [...summary.values()];
+}
+
+function activeMember(workspace) {
+  return workspace.members.find((member) => member.id === workspace.activeMemberId) || workspace.members[0];
+}
+
+function renderMemberOptions(select, workspace) {
+  if (!select) return;
+  select.innerHTML = workspace.members
+    .map((member) => `<option value="${escapeHtml(member.id)}">${escapeHtml(member.name)}</option>`)
+    .join("");
+  select.value = workspace.activeMemberId;
+}
+
+async function setActiveMember(memberId) {
+  const workspace = await getWorkspace();
+  if (!workspace.members.some((member) => member.id === memberId)) return;
+  workspace.activeMemberId = memberId;
+  await saveWorkspace(workspace);
+  await refreshWorkspaceViews();
+}
+
+async function refreshWorkspaceViews() {
+  const activePage = document.querySelector(".tab-page.active")?.id || "";
+  if (activePage === "pageDashboard") await refreshDashboard();
+  if (activePage === "pageBudget") await refreshBudget();
+  if (activePage === "pageTeam") await refreshTeam();
+  if (activePage === "pageSecurity") await refreshSecurity();
+}
+
 function switchTab(tabName) {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
@@ -647,6 +811,7 @@ function switchTab(tabName) {
   });
 
   // Refresh data when entering pages
+  if (tabName === "dashboard") refreshDashboard();
   if (tabName === "chat") {
     refreshChatProxyStatus();
     loadChatModels();
@@ -654,6 +819,8 @@ function switchTab(tabName) {
   if (tabName === "connectors") refreshConnectors();
   if (tabName === "history") refreshHistory();
   if (tabName === "budget") refreshBudget();
+  if (tabName === "team") refreshTeam();
+  if (tabName === "security") refreshSecurity();
 }
 
 /* ── Utilities ── */
@@ -1806,6 +1973,8 @@ async function recordEstimation() {
     return;
   }
   if (!(await canAddHistoryEntry())) return;
+  const workspace = await getWorkspace();
+  const member = activeMember(workspace);
   const entry = {
     timestamp: Date.now(),
     model: lastReport.model,
@@ -1819,6 +1988,8 @@ async function recordEstimation() {
     outputTokens: lastReport.outputTokens,
     cost: lastReport.singleCost,
     cacheRatio: lastReport.cacheRatio,
+    memberId: member?.id || "me",
+    memberName: member?.name || "我",
   };
   await storage.addHistory(entry);
   showToast("已记录到历史", "success");
@@ -2232,6 +2403,204 @@ async function handleClipboardText(text) {
 
 /* ── History page ── */
 
+/* ── Local workspace dashboard ── */
+
+async function currentMonthUsage() {
+  const workspace = await getWorkspace();
+  const history = await storage.getHistory();
+  const { monthStart, monthEnd } = monthRange();
+  const monthHistory = history.filter((entry) => entry.timestamp >= monthStart && entry.timestamp <= monthEnd);
+  const confidence = summarizeConfidence(monthHistory);
+  return { workspace, history, monthHistory, confidence };
+}
+
+async function refreshDashboard() {
+  if (!els.dashboardSpend) return;
+  const { workspace, monthHistory, confidence } = await currentMonthUsage();
+  const budgetUsd = walletBudgetUsd(workspace);
+  const remainingUsd = Math.max(0, budgetUsd - confidence.totalCost);
+  const riskCount = monthHistory.filter((entry) => entry.security?.riskLevel && entry.security.riskLevel !== "low").length;
+
+  els.dashboardSpend.textContent = toDisplayMoney(confidence.totalCost, workspace);
+  els.dashboardBudget.textContent = toDisplayMoney(budgetUsd, workspace);
+  els.dashboardRemaining.textContent = toDisplayMoney(remainingUsd, workspace);
+  els.dashboardCalls.textContent = formatNumber(monthHistory.length);
+  els.dashboardRisk.textContent = formatNumber(riskCount);
+  els.dashboardActiveMember.textContent = activeMember(workspace)?.name || "未设置";
+  renderMemberOptions(els.dashboardMemberSelect, workspace);
+
+  const memberRows = summarizeByMember(monthHistory, workspace)
+    .sort((a, b) => b.cost - a.cost)
+    .map((row) => {
+      const budget = Number(row.member.monthlyBudget || workspace.wallet.monthlyBudget || 0);
+      const budgetUsdForMember = workspace.wallet.currency === "CNY" ? budget / CNY_PER_USD : budget;
+      const pct = budgetUsdForMember > 0 ? Math.min(999, (row.cost / budgetUsdForMember) * 100) : 0;
+      return `
+        <tr>
+          <td>${escapeHtml(row.member.name)}</td>
+          <td>${escapeHtml(row.member.role || "Member")}</td>
+          <td>${toDisplayMoney(row.cost, workspace)}</td>
+          <td>${formatNumber(row.tokens)}</td>
+          <td>${pct.toFixed(1)}%</td>
+          <td>${row.risks ? `<span class="status-badge status-warn">${row.risks}</span>` : `<span class="status-badge status-good">0</span>`}</td>
+        </tr>`;
+    })
+    .join("");
+  if (els.dashboardMemberTable) els.dashboardMemberTable.innerHTML = memberRows;
+
+  const alerts = [];
+  const usedPct = budgetUsd > 0 ? (confidence.totalCost / budgetUsd) * 100 : 0;
+  if (usedPct >= Number(workspace.wallet.warningPct || 80)) {
+    alerts.push(`本月 AI 额度已使用 ${usedPct.toFixed(1)}%，接近或超过预警线。`);
+  }
+  if (riskCount > 0) {
+    alerts.push(`本月检测到 ${riskCount} 条中高风险调用，请到安全页查看。`);
+  }
+  if (!monthHistory.length) {
+    alerts.push("还没有本月用量。先通过估算、网关或本地日志同步产生记录。");
+  }
+  els.dashboardAlertList.innerHTML = alerts.map((item) => `<div class="insight-item"><strong>${escapeHtml(item)}</strong><span>本地策略提醒</span></div>`).join("");
+}
+
+function renderWalletTokenCapacity(workspace) {
+  if (!els.walletTokenCapacity) return;
+  const model = models.find((item) => item.id === workspace.wallet.tokenModelId) || models[0];
+  const budgetUsd = walletBudgetUsd(workspace);
+  const inputTokens = model.input > 0 ? Math.floor((budgetUsd / model.input) * 1_000_000) : 0;
+  const outputTokens = model.output > 0 ? Math.floor((budgetUsd / model.output) * 1_000_000) : 0;
+  els.walletUsdBudget.textContent = `$${budgetUsd.toFixed(2)}`;
+  els.walletTokenCapacity.textContent = `${formatNumber(inputTokens)} 输入 token / ${formatNumber(outputTokens)} 输出 token`;
+}
+
+async function refreshWalletPanel(workspace, monthHistory) {
+  if (!els.walletCurrency) return;
+  els.walletCurrency.value = workspace.wallet.currency || "CNY";
+  els.walletMonthlyBudget.value = workspace.wallet.monthlyBudget || 300;
+  els.walletWarningPct.value = workspace.wallet.warningPct || 80;
+  els.walletTokenModel.innerHTML = models
+    .map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.provider)} / ${escapeHtml(model.name)}</option>`)
+    .join("");
+  els.walletTokenModel.value = workspace.wallet.tokenModelId || "gpt-5-mini";
+  renderWalletTokenCapacity(workspace);
+
+  const rows = summarizeByMember(monthHistory, workspace)
+    .map((row) => {
+      const budget = Number(row.member.monthlyBudget || workspace.wallet.monthlyBudget || 0);
+      const budgetUsdForMember = workspace.wallet.currency === "CNY" ? budget / CNY_PER_USD : budget;
+      const remaining = Math.max(0, budgetUsdForMember - row.cost);
+      return `
+        <tr>
+          <td>${escapeHtml(row.member.name)}</td>
+          <td>${currencySymbol(workspace.wallet.currency)}${budget.toFixed(2)}</td>
+          <td>${toDisplayMoney(row.cost, workspace)}</td>
+          <td>${toDisplayMoney(remaining, workspace)}</td>
+          <td>${formatNumber(row.tokens)}</td>
+        </tr>`;
+    })
+    .join("");
+  if (els.walletMemberTable) els.walletMemberTable.innerHTML = rows;
+}
+
+async function saveWalletSettings() {
+  const workspace = await getWorkspace();
+  workspace.wallet.currency = els.walletCurrency.value;
+  workspace.wallet.monthlyBudget = Number(els.walletMonthlyBudget.value || 0);
+  workspace.wallet.warningPct = Number(els.walletWarningPct.value || 80);
+  workspace.wallet.tokenModelId = els.walletTokenModel.value;
+  await saveWorkspace(workspace);
+  showToast("钱包额度已保存", "success");
+  await refreshBudget();
+  await refreshDashboard();
+}
+
+async function refreshTeam() {
+  if (!els.teamMemberTable) return;
+  const { workspace, monthHistory } = await currentMonthUsage();
+  renderMemberOptions(els.teamActiveMember, workspace);
+  els.teamMemberTable.innerHTML = summarizeByMember(monthHistory, workspace)
+    .map((row) => `
+      <tr>
+        <td>${escapeHtml(row.member.name)}</td>
+        <td>${escapeHtml(row.member.role || "Member")}</td>
+        <td>${currencySymbol(workspace.wallet.currency)}${Number(row.member.monthlyBudget || 0).toFixed(2)}</td>
+        <td>${toDisplayMoney(row.cost, workspace)}</td>
+        <td>${formatNumber(row.calls)}</td>
+        <td>${row.member.enabled === false ? "禁用" : "启用"}</td>
+      </tr>`)
+    .join("");
+}
+
+async function addTeamMember() {
+  const name = els.teamMemberName.value.trim();
+  if (!name) {
+    showToast("请填写成员名称", "warn");
+    return;
+  }
+  const workspace = await getWorkspace();
+  workspace.members.push({
+    id: `m_${Date.now().toString(36)}`,
+    name,
+    role: els.teamMemberRole.value.trim() || "Member",
+    monthlyBudget: Number(els.teamMemberBudget.value || workspace.wallet.monthlyBudget || 0),
+    enabled: true,
+    allowedModels: "all",
+  });
+  await saveWorkspace(workspace);
+  els.teamMemberName.value = "";
+  els.teamMemberRole.value = "";
+  els.teamMemberBudget.value = "";
+  showToast("成员已添加", "success");
+  await refreshTeam();
+  await refreshDashboard();
+}
+
+async function refreshSecurity() {
+  if (!els.securityDetectSecrets) return;
+  const { workspace, monthHistory } = await currentMonthUsage();
+  const security = workspace.security;
+  els.securityDetectSecrets.checked = !!security.detectSecrets;
+  els.securityDetectPII.checked = !!security.detectPII;
+  els.securityDetectCustomerData.checked = !!security.detectCustomerData;
+  els.securityBlockHighRisk.checked = !!security.blockHighRisk;
+  els.securityKeywords.value = security.customKeywords || "";
+
+  const riskEntries = monthHistory.filter((entry) => entry.security?.riskLevel && entry.security.riskLevel !== "low");
+  els.securitySummary.textContent = riskEntries.length
+    ? `本月检测到 ${riskEntries.length} 条中高风险调用。`
+    : "本月暂无中高风险调用。";
+  els.securityRecentTable.innerHTML = riskEntries
+    .slice()
+    .reverse()
+    .slice(0, 50)
+    .map((entry) => {
+      const date = new Date(entry.timestamp);
+      const reasons = (entry.security?.reasons || []).join(" / ");
+      return `
+        <tr>
+          <td>${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}</td>
+          <td>${escapeHtml(memberForEntry(entry, workspace)?.name || "")}</td>
+          <td><span class="status-badge status-warn">${escapeHtml(entry.security.riskLevel)}</span></td>
+          <td>${escapeHtml(reasons)}</td>
+          <td>${entry.blocked ? "已拦截" : "已提醒"}</td>
+        </tr>`;
+    })
+    .join("");
+}
+
+async function saveSecuritySettings() {
+  const workspace = await getWorkspace();
+  workspace.security = {
+    detectSecrets: els.securityDetectSecrets.checked,
+    detectPII: els.securityDetectPII.checked,
+    detectCustomerData: els.securityDetectCustomerData.checked,
+    blockHighRisk: els.securityBlockHighRisk.checked,
+    customKeywords: els.securityKeywords.value,
+  };
+  await saveWorkspace(workspace);
+  showToast("安全策略已保存", "success");
+  await refreshSecurity();
+}
+
 function confidenceForEntry(entry) {
   if (entry.confidence === "official") return "official";
   if (entry.observedOnly || entry.confidence === "observed") return "observed";
@@ -2363,6 +2732,7 @@ async function refreshHistory() {
           <tr>
             <td>${timeStr}</td>
             <td>${sourceLabel}</td>
+            <td>${escapeHtml(h.memberName || h.memberId || "我")}</td>
             <td><span class="provider-tag provider-${(h.provider || "").toLowerCase()}">${h.provider || ""}</span> ${h.model || ""} ${modelMeta}</td>
             <td>${formatNumber(h.inputTokens)}</td>
             <td>${formatNumber(h.outputTokens)}</td>
@@ -2568,6 +2938,7 @@ async function autoSyncLocalUsage() {
 
 async function refreshBudget() {
   const budget = await storage.getBudget();
+  const workspace = await getWorkspace();
   const amount = budget.amount || 50;
   const threshold = budget.threshold || 80;
   els.budgetAmount.value = amount;
@@ -2590,6 +2961,7 @@ async function refreshBudget() {
   const monthHistory = history.filter(
     (h) => h.timestamp >= monthStart && h.timestamp <= monthEnd + 86400000
   );
+  await refreshWalletPanel(workspace, monthHistory);
   const confidence = summarizeConfidence(monthHistory);
 
   const totalUsed = confidence.totalCost;
@@ -2950,6 +3322,17 @@ function bindEvents() {
     els.chatTemperatureLabel.textContent = Number(els.chatTemperature.value).toFixed(1);
   });
 
+  els.dashboardMemberSelect?.addEventListener("change", () => setActiveMember(els.dashboardMemberSelect.value));
+  els.saveWallet?.addEventListener("click", saveWalletSettings);
+  els.walletTokenModel?.addEventListener("change", async () => {
+    const workspace = await getWorkspace();
+    workspace.wallet.tokenModelId = els.walletTokenModel.value;
+    renderWalletTokenCapacity(workspace);
+  });
+  els.teamAddMember?.addEventListener("click", addTeamMember);
+  els.teamActiveMember?.addEventListener("change", () => setActiveMember(els.teamActiveMember.value));
+  els.saveSecurity?.addEventListener("click", saveSecuritySettings);
+
   // Connectors page
   els.refreshConnectors?.addEventListener("click", () => refreshConnectors(true));
   els.connectorSyncAll?.addEventListener("click", async () => {
@@ -3141,6 +3524,7 @@ renderChatStats();
 bindEvents();
 update();
 loadSettings().then(() => {
+  refreshDashboard();
   refreshChatProxyStatus();
   if (storage.isElectron) {
     autoSyncLocalUsage();

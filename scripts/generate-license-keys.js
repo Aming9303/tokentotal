@@ -25,5 +25,6 @@ fs.writeFileSync(publicPath, publicPem, "utf8");
 console.log(`Private key: ${privatePath}`);
 console.log(`Public key:  ${publicPath}`);
 console.log("");
-console.log("Keep private.pem secret. Put public.pem into the app runtime as:");
-console.log(`$env:TOKENTOTAL_LICENSE_PUBLIC_KEY_PATH="${publicPath}"`);
+console.log("Keep private.pem secret. Do not send it to users.");
+console.log("Next step for packaged beta builds:");
+console.log("npm run license:publish-public");

@@ -47,6 +47,18 @@ const PRO_FEATURES = Object.freeze([
   "exportData",
   "unlimitedHistory",
 ]);
+const DEFAULT_WORKSPACE = Object.freeze({
+  activeMemberId: "me",
+  wallet: { currency: "CNY", monthlyBudget: 300, warningPct: 80, tokenModelId: "gpt-5-mini" },
+  members: [{ id: "me", name: "我", role: "Owner", monthlyBudget: 300, enabled: true, allowedModels: "all" }],
+  security: {
+    detectSecrets: true,
+    detectPII: true,
+    detectCustomerData: true,
+    blockHighRisk: false,
+    customKeywords: "客户资料\n合同\n身份证\n银行卡\napi key\nsecret",
+  },
+});
 
 function readLicensePublicKey() {
   if (process.env.TOKENTOTAL_LICENSE_PUBLIC_KEY) {
@@ -55,6 +67,7 @@ function readLicensePublicKey() {
   const candidates = [
     process.env.TOKENTOTAL_LICENSE_PUBLIC_KEY_PATH,
     path.join(__dirname, "license-public.pem"),
+    process.resourcesPath ? path.join(process.resourcesPath, "license-public.pem") : "",
     !app.isPackaged ? path.join(__dirname, ".license", "public.pem") : "",
   ].filter(Boolean);
 
@@ -188,7 +201,7 @@ function verifyLicenseKey(value = "") {
   if (!LICENSE_PUBLIC_KEY_PEM) {
     return {
       success: false,
-      error: "当前构建未配置授权公钥，暂时只能在开发环境使用 TT-DEV-PRO 测试",
+      error: "当前应用包没有内置授权公钥。请让开发者重新打包含 license-public.pem 的版本；TT-DEV-PRO 仅开发环境可用。",
       status: freeLicenseStatus("missing-public-key"),
     };
   }
@@ -1143,6 +1156,92 @@ function scanLocalUsage(source) {
 
 /* ── Usage proxy ── */
 
+function normalizeWorkspace(raw = {}) {
+  const workspace = {
+    ...DEFAULT_WORKSPACE,
+    ...raw,
+    wallet: { ...DEFAULT_WORKSPACE.wallet, ...(raw.wallet || {}) },
+    security: { ...DEFAULT_WORKSPACE.security, ...(raw.security || {}) },
+    members: Array.isArray(raw.members) && raw.members.length ? raw.members : DEFAULT_WORKSPACE.members,
+  };
+  if (!workspace.members.some((member) => member.id === workspace.activeMemberId)) {
+    workspace.activeMemberId = workspace.members[0]?.id || "me";
+  }
+  return workspace;
+}
+
+function getWorkspace() {
+  return normalizeWorkspace(store?.data?.settings?.workspace || {});
+}
+
+function activeWorkspaceMember(workspace = getWorkspace()) {
+  return workspace.members.find((member) => member.id === workspace.activeMemberId) || workspace.members[0];
+}
+
+function analyzeSecurityRisk(text = "", workspace = getWorkspace()) {
+  const security = workspace.security || DEFAULT_WORKSPACE.security;
+  const reasons = [];
+  const source = String(text || "");
+
+  if (security.detectSecrets) {
+    if (/(sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,})/.test(source)) {
+      reasons.push("疑似 API Key");
+    }
+    if (/(api[_-]?key|secret|access[_-]?token|bearer\s+[A-Za-z0-9._-]{20,})/i.test(source)) {
+      reasons.push("疑似密钥字段");
+    }
+  }
+
+  if (security.detectPII) {
+    if (/(?:\+?86[-\s]?)?1[3-9]\d{9}/.test(source)) reasons.push("疑似手机号");
+    if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(source)) reasons.push("疑似邮箱");
+    if (/\b\d{17}[\dXx]\b/.test(source)) reasons.push("疑似身份证号");
+  }
+
+  if (security.detectCustomerData) {
+    const keywords = String(security.customKeywords || "")
+      .split(/\r?\n|,|，/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const hit = keywords.find((keyword) => source.toLowerCase().includes(keyword.toLowerCase()));
+    if (hit) reasons.push(`命中关键词：${hit}`);
+  }
+
+  const riskLevel = reasons.some((item) => /API Key|密钥|身份证/.test(item))
+    ? "high"
+    : reasons.length
+      ? "medium"
+      : "low";
+  return {
+    riskLevel,
+    reasons,
+    blocked: riskLevel === "high" && !!security.blockHighRisk,
+  };
+}
+
+function addSecurityHistoryEntry({ risk, requestPath, provider, member }) {
+  if (!risk || risk.riskLevel === "low" || !store) return;
+  store.addHistory({
+    timestamp: Date.now(),
+    model: "Security Policy",
+    modelId: "security-policy",
+    provider: provider || "TokenTotal",
+    source: "Security",
+    externalId: `security:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
+    inputTokens: 0,
+    outputTokens: 0,
+    cost: 0,
+    memberId: member?.id || "me",
+    memberName: member?.name || "我",
+    blocked: !!risk.blocked,
+    requestPath,
+    security: {
+      riskLevel: risk.riskLevel,
+      reasons: risk.reasons,
+    },
+  });
+}
+
 function normalizeProxyConfig(config = {}) {
   const port = Math.max(1024, Math.min(65535, Number(config.port) || 8787));
   const targetBaseUrl = String(config.targetBaseUrl || "http://127.0.0.1:11434").replace(/\/+$/, "");
@@ -1381,6 +1480,9 @@ function buildUsageEntry({ requestBody, responseBody, requestPath, targetBaseUrl
   const requestJson = parseJsonSafe(requestBody);
   const responseJson = parseJsonSafe(responseBody);
   const provider = providerHint || detectProviderFromUrl(targetBaseUrl);
+  const workspace = getWorkspace();
+  const member = activeWorkspaceMember(workspace);
+  const securityRisk = analyzeSecurityRisk(requestBody, workspace);
   let model = responseJson?.model || requestJson?.model || "unknown";
   let inputTokens = 0;
   let cachedInputTokens = 0;
@@ -1437,6 +1539,12 @@ function buildUsageEntry({ requestBody, responseBody, requestPath, targetBaseUrl
     cost: costInfo.cost,
     cacheRatio: inputTokens > 0 ? cachedInputTokens / inputTokens : 0,
     proxyTarget: targetBaseUrl,
+    memberId: member?.id || "me",
+    memberName: member?.name || "我",
+    security: {
+      riskLevel: securityRisk.riskLevel,
+      reasons: securityRisk.reasons,
+    },
   };
 }
 
@@ -1488,6 +1596,26 @@ async function startUsageProxy(config) {
       } catch (error) {
         clientRes.writeHead(400, { "content-type": "application/json" });
         clientRes.end(JSON.stringify({ error: `Invalid proxy target: ${error.message}` }));
+        return;
+      }
+      const workspace = getWorkspace();
+      const member = activeWorkspaceMember(workspace);
+      const securityRisk = analyzeSecurityRisk(requestBody, workspace);
+      if (securityRisk.riskLevel !== "low") {
+        addSecurityHistoryEntry({
+          risk: securityRisk,
+          requestPath: targetUrl.pathname,
+          provider: nextConfig.provider,
+          member,
+        });
+      }
+      if (securityRisk.blocked) {
+        clientRes.writeHead(403, { "content-type": "application/json" });
+        clientRes.end(JSON.stringify({
+          error: "TokenTotal 安全策略已拦截此请求",
+          riskLevel: securityRisk.riskLevel,
+          reasons: securityRisk.reasons,
+        }));
         return;
       }
       const transport = targetUrl.protocol === "https:" ? https : http;

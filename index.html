@@ -17,11 +17,14 @@
             <span class="edition-badge" id="editionBadge">Free</span>
           </div>
           <nav class="tab-nav" role="tablist">
-            <button class="tab-btn active" data-tab="estimate" role="tab" aria-selected="true">估算</button>
+            <button class="tab-btn active" data-tab="dashboard" role="tab" aria-selected="true">仪表盘</button>
+            <button class="tab-btn" data-tab="estimate" role="tab" aria-selected="false">估算</button>
             <button class="tab-btn" data-tab="chat" role="tab" aria-selected="false">聊天</button>
-            <button class="tab-btn" data-tab="connectors" role="tab" aria-selected="false">连接器</button>
+            <button class="tab-btn" data-tab="connectors" role="tab" aria-selected="false">网关</button>
+            <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">钱包</button>
+            <button class="tab-btn" data-tab="team" role="tab" aria-selected="false">团队</button>
+            <button class="tab-btn" data-tab="security" role="tab" aria-selected="false">安全</button>
             <button class="tab-btn" data-tab="history" role="tab" aria-selected="false">历史</button>
-            <button class="tab-btn" data-tab="budget" role="tab" aria-selected="false">预算</button>
             <button class="tab-btn" data-tab="settings" role="tab" aria-selected="false">设置</button>
           </nav>
         </div>
@@ -30,8 +33,68 @@
         </div>
       </header>
 
+      <!-- ══════════ 仪表盘标签页 ══════════ -->
+      <div id="pageDashboard" class="tab-page active" role="tabpanel">
+        <section class="metrics-band four-col">
+          <article class="metric primary">
+            <span>本月 AI 花费</span>
+            <strong id="dashboardSpend">¥0.00</strong>
+            <small>按本机记录估算</small>
+          </article>
+          <article class="metric">
+            <span>本月额度</span>
+            <strong id="dashboardBudget">¥0.00</strong>
+            <small>来自钱包配置</small>
+          </article>
+          <article class="metric">
+            <span>剩余额度</span>
+            <strong id="dashboardRemaining">¥0.00</strong>
+            <small id="dashboardActiveMember">我</small>
+          </article>
+          <article class="metric">
+            <span>调用 / 风险</span>
+            <strong><span id="dashboardCalls">0</span> / <span id="dashboardRisk">0</span></strong>
+            <small>本月记录</small>
+          </article>
+        </section>
+
+        <section class="dashboard-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>AI 额度钱包</h2>
+                <span class="source-note">用钱做额度，用 token 做明细。先在本机模拟个人和团队管理。</span>
+              </div>
+              <select id="dashboardMemberSelect" class="range-select"></select>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>成员</th>
+                    <th>角色</th>
+                    <th>本月花费</th>
+                    <th>Token</th>
+                    <th>额度占用</th>
+                    <th>风险</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboardMemberTable"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>本地策略提醒</h2>
+            </div>
+            <div class="insight-list compact" id="dashboardAlertList"></div>
+          </section>
+        </section>
+      </div>
+
       <!-- ══════════ 估算标签页 ══════════ -->
-      <div id="pageEstimate" class="tab-page active" role="tabpanel">
+      <div id="pageEstimate" class="tab-page" role="tabpanel">
         <!-- Action bar -->
         <div class="action-bar">
           <div class="action-bar-left">
@@ -629,6 +692,7 @@
                 <tr>
                   <th>时间</th>
                   <th>来源</th>
+                  <th>成员</th>
                   <th>模型</th>
                   <th>输入 token</th>
                   <th>输出 token</th>
@@ -645,6 +709,61 @@
 
       <!-- ══════════ 预算标签页 ══════════ -->
       <div id="pageBudget" class="tab-page" role="tabpanel">
+        <section class="panel wallet-panel">
+          <div class="panel-head">
+            <div>
+              <h2>AI 额度钱包</h2>
+              <span class="source-note">用金额设置个人或团队额度，同时显示这些钱大约能买多少 token。</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="field">
+              <span>币种</span>
+              <select id="walletCurrency">
+                <option value="CNY">人民币 CNY</option>
+                <option value="USD">美元 USD</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>月度额度</span>
+              <input id="walletMonthlyBudget" type="number" min="0" step="1" value="300" />
+            </label>
+            <label class="field">
+              <span>预警线 (%)</span>
+              <input id="walletWarningPct" type="number" min="1" max="100" step="1" value="80" />
+            </label>
+            <label class="field">
+              <span>Token 参照模型</span>
+              <select id="walletTokenModel"></select>
+            </label>
+            <button class="primary-button" id="saveWallet" type="button">保存钱包</button>
+          </div>
+          <div class="wallet-summary-grid">
+            <div>
+              <span>折合美元预算</span>
+              <strong id="walletUsdBudget">$0.00</strong>
+            </div>
+            <div>
+              <span>约等于</span>
+              <strong id="walletTokenCapacity">0 输入 token / 0 输出 token</strong>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>成员</th>
+                  <th>额度</th>
+                  <th>已用</th>
+                  <th>剩余</th>
+                  <th>Token</th>
+                </tr>
+              </thead>
+              <tbody id="walletMemberTable"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="panel connector-panel">
           <div class="panel-head">
             <div>
@@ -766,6 +885,123 @@
               <input id="budgetThreshold" type="number" min="0" max="100" step="5" value="80" />
             </label>
             <button class="primary-button" id="saveBudget" type="button">保存预算</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ══════════ 团队标签页 ══════════ -->
+      <div id="pageTeam" class="tab-page" role="tabpanel">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>本地团队</h2>
+              <span class="source-note">先在本机模拟团队管理：成员、额度、当前使用身份和本月用量排行。</span>
+            </div>
+            <select id="teamActiveMember" class="range-select"></select>
+          </div>
+          <div class="settings-row">
+            <label class="field">
+              <span>成员名称</span>
+              <input id="teamMemberName" type="text" placeholder="例如：张三" />
+            </label>
+            <label class="field">
+              <span>角色</span>
+              <input id="teamMemberRole" type="text" placeholder="研发 / 运营 / Owner" />
+            </label>
+            <label class="field">
+              <span>月额度</span>
+              <input id="teamMemberBudget" type="number" min="0" step="1" placeholder="300" />
+            </label>
+            <button class="primary-button" id="teamAddMember" type="button">添加成员</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>成员用量</h2>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>成员</th>
+                  <th>角色</th>
+                  <th>月额度</th>
+                  <th>本月已用</th>
+                  <th>调用</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody id="teamMemberTable"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ══════════ 安全标签页 ══════════ -->
+      <div id="pageSecurity" class="tab-page" role="tabpanel">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>安全策略</h2>
+              <span class="source-note">网关会在调用前检测敏感信息。默认提醒，开启拦截后会阻止高风险请求。</span>
+            </div>
+            <button class="primary-button" id="saveSecurity" type="button">保存策略</button>
+          </div>
+          <div class="settings-group">
+            <label class="setting-item">
+              <div>
+                <strong>检测 API Key / Secret</strong>
+                <p>识别常见密钥、Bearer token、sk- 开头密钥等。</p>
+              </div>
+              <input id="securityDetectSecrets" type="checkbox" checked />
+            </label>
+            <label class="setting-item">
+              <div>
+                <strong>检测个人信息</strong>
+                <p>识别手机号、邮箱、身份证号等常见 PII。</p>
+              </div>
+              <input id="securityDetectPII" type="checkbox" checked />
+            </label>
+            <label class="setting-item">
+              <div>
+                <strong>检测客户数据关键词</strong>
+                <p>根据关键词识别合同、客户资料、银行卡等业务敏感内容。</p>
+              </div>
+              <input id="securityDetectCustomerData" type="checkbox" checked />
+            </label>
+            <label class="setting-item">
+              <div>
+                <strong>高风险请求直接拦截</strong>
+                <p>关闭时仅记录风险；开启后网关会返回 403。</p>
+              </div>
+              <input id="securityBlockHighRisk" type="checkbox" />
+            </label>
+            <label class="field">
+              <span>自定义敏感关键词</span>
+              <textarea id="securityKeywords" class="compact-textarea" spellcheck="false"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>风险记录</h2>
+            <span class="source-note" id="securitySummary">本月暂无中高风险调用。</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>成员</th>
+                  <th>风险</th>
+                  <th>原因</th>
+                  <th>动作</th>
+                </tr>
+              </thead>
+              <tbody id="securityRecentTable"></tbody>
+            </table>
           </div>
         </section>
       </div>
